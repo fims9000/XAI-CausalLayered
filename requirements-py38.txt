@@ -1,0 +1,23 @@
+# Compatible requirements for Python 3.8
+# Core ML libraries (REQUIRED)
+scikit-learn==1.3.0
+xgboost==1.7.6
+numpy==1.24.3
+pandas==2.0.3
+scipy==1.10.1
+
+# Explainability and interpretability (REQUIRED)
+shap==0.42.1
+
+# Visualization (REQUIRED)
+matplotlib==3.7.2
+seaborn==0.12.2
+
+# Statistical analysis (REQUIRED)
+statsmodels==0.14.0
+
+# Console formatting (REQUIRED for this project)
+colorama==0.4.6
+
+# Additional statistical libraries
+pingouin==0.5.3
