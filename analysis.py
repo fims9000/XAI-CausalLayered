@@ -60,6 +60,9 @@ class XGBoostModel:
             
             self.model.fit(X_train, y_train)
             
+            # Сохраняем y_test для графиков
+            self.y_test_actual = y_test
+            
             # Evaluate
             predictions = self.model.predict(X_test)
             self.probabilities = self.model.predict_proba(X_test)[:, 1]
@@ -89,6 +92,68 @@ class XGBoostModel:
         print(f"\n{Colors.INFO}📊 TOP 5 FEATURE IMPORTANCES{Colors.RESET}")
         for i, (_, row) in enumerate(self.feature_importances.head(5).iterrows(), 1):
             print(f"{i}. {row['feature']:<25} {row['importance']:.4f}")
+        
+        # Создаем графики производительности
+        self.plot_model_performance()
+    
+    def plot_model_performance(self):
+        """Графики производительности XGBoost модели."""
+        try:
+            import matplotlib.pyplot as plt
+            import seaborn as sns
+            from sklearn.metrics import roc_curve, auc, calibration_curve
+            
+            print(f"  {Colors.INFO}📊 Creating performance plots...{Colors.RESET}")
+            
+            fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+            fig.suptitle('XGBoost Model Performance Analysis', fontsize=16, fontweight='bold')
+            
+            # 1. ROC Curve
+            fpr, tpr, _ = roc_curve(self.y_test_actual, self.probabilities)
+            roc_auc = auc(fpr, tpr)
+            
+            axes[0,0].plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC Curve (AUC = {roc_auc:.3f})')
+            axes[0,0].plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+            axes[0,0].set_xlabel('False Positive Rate')
+            axes[0,0].set_ylabel('True Positive Rate')
+            axes[0,0].set_title('ROC Curve')
+            axes[0,0].legend()
+            axes[0,0].grid(True)
+            
+            # 2. Feature Importance
+            top_features = self.feature_importances.head(8)
+            axes[0,1].barh(top_features['feature'], top_features['importance'], color='skyblue')
+            axes[0,1].set_xlabel('Feature Importance')
+            axes[0,1].set_title('Top-8 Important Features')
+            axes[0,1].grid(True, axis='x')
+            
+            # 3. Probability Distribution
+            axes[1,0].hist(self.probabilities[self.y_test_actual == 0], bins=20, alpha=0.7, 
+                           label='Healthy', color='green', density=True)
+            axes[1,0].hist(self.probabilities[self.y_test_actual == 1], bins=20, alpha=0.7, 
+                           label='Disease', color='red', density=True)
+            axes[1,0].set_xlabel('Predicted Probability')
+            axes[1,0].set_ylabel('Density')
+            axes[1,0].set_title('Prediction Distribution')
+            axes[1,0].legend()
+            axes[1,0].grid(True)
+            
+            # 4. Calibration Plot
+            prob_true, prob_pred = calibration_curve(self.y_test_actual, self.probabilities, n_bins=10)
+            axes[1,1].plot(prob_pred, prob_true, marker='o', linewidth=2, label='Calibration')
+            axes[1,1].plot([0, 1], [0, 1], linestyle='--', color='gray', label='Perfect Calibration')
+            axes[1,1].set_xlabel('Mean Predicted Probability')
+            axes[1,1].set_ylabel('Fraction of Positives')
+            axes[1,1].set_title('Calibration Plot')
+            axes[1,1].legend()
+            axes[1,1].grid(True)
+            
+            plt.tight_layout()
+            plt.show()
+            print(f"  {Colors.SUCCESS}✅ Performance plots created{Colors.RESET}")
+            
+        except Exception as e:
+            print(f"  {Colors.WARNING}⚠️ Failed to create performance plots: {str(e)}{Colors.RESET}")
     
     def temperature_scaling_calibration(self, X_val: np.ndarray, y_val: np.ndarray) -> float:
         """Apply temperature scaling calibration following Guo et al., 2017."""
@@ -246,11 +311,88 @@ class XGBoostModel:
             print(f"  {Colors.INFO}🎲 Predictive Entropy: {predictive_entropy:.4f}{Colors.RESET}")
             print(f"  {Colors.INFO}🎲 Mutual Information: {mutual_information:.4f}{Colors.RESET}")
             
+            # Сохраняем данные для визуализации
+            self.entropy_per_sample = entropy_per_sample
+            self.probabilities_ensemble = probabilities
+            
+            # Создаем графики неопределенности
+            self.plot_uncertainty_analysis(uncertainty_metrics)
+            
             return uncertainty_metrics
             
         except Exception as e:
             print(f"  {Colors.ERROR}❌ Uncertainty quantification failed: {str(e)}{Colors.RESET}")
             return UncertaintyMetrics()
+    
+    def plot_uncertainty_analysis(self, uncertainty_metrics):
+        """Графики анализа неопределенности."""
+        try:
+            import matplotlib.pyplot as plt
+            import seaborn as sns
+            
+            print(f"  {Colors.INFO}🎲 Creating uncertainty plots...{Colors.RESET}")
+            
+            fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+            fig.suptitle('Model Uncertainty Analysis', fontsize=16, fontweight='bold')
+            
+            # 1. Types of uncertainty
+            uncertainty_types = ['Epistemic', 'Aleatoric', 'Entropy', 'Mutual Information']
+            uncertainty_values = [
+                uncertainty_metrics.epistemic_uncertainty,
+                uncertainty_metrics.aleatoric_uncertainty, 
+                uncertainty_metrics.predictive_entropy,
+                uncertainty_metrics.mutual_information
+            ]
+            
+            colors = ['lightblue', 'lightgreen', 'lightyellow', 'lightpink']
+            bars = axes[0,0].bar(uncertainty_types, uncertainty_values, color=colors)
+            axes[0,0].set_ylabel('Uncertainty Value')
+            axes[0,0].set_title('Types of Uncertainty')
+            axes[0,0].tick_params(axis='x', rotation=45)
+            
+            # Add values on bars
+            for bar, value in zip(bars, uncertainty_values):
+                axes[0,0].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.001,
+                               f'{value:.3f}', ha='center', va='bottom')
+            
+            # 2. Entropy distribution across patients
+            if hasattr(self, 'entropy_per_sample'):
+                axes[0,1].hist(self.entropy_per_sample, bins=15, color='orange', alpha=0.7)
+                axes[0,1].set_xlabel('Prediction Entropy')
+                axes[0,1].set_ylabel('Number of Patients')
+                axes[0,1].set_title('Entropy Distribution')
+                axes[0,1].grid(True)
+            
+            # 3. Confidence intervals
+            if hasattr(self, 'probabilities_ensemble'):
+                mean_probs = np.mean(self.probabilities_ensemble, axis=0)
+                std_probs = np.std(self.probabilities_ensemble, axis=0)
+                
+                x_idx = np.arange(min(50, len(mean_probs)))  # Show only first 50
+                axes[1,0].fill_between(x_idx, mean_probs[:len(x_idx)] - 2*std_probs[:len(x_idx)], 
+                                       mean_probs[:len(x_idx)] + 2*std_probs[:len(x_idx)], 
+                                       alpha=0.3, color='blue', label='95% CI')
+                axes[1,0].plot(x_idx, mean_probs[:len(x_idx)], 'b-', label='Mean Probability')
+                axes[1,0].set_xlabel('Patient Number')
+                axes[1,0].set_ylabel('Disease Probability')
+                axes[1,0].set_title('Prediction Confidence Intervals')
+                axes[1,0].legend()
+                axes[1,0].grid(True)
+            
+            # 4. Uncertainty correlation matrix
+            uncertainty_data = np.array([uncertainty_values]).T
+            im = axes[1,1].imshow(uncertainty_data, cmap='viridis', aspect='auto')
+            axes[1,1].set_yticks(range(len(uncertainty_types)))
+            axes[1,1].set_yticklabels(uncertainty_types)
+            axes[1,1].set_title('Uncertainty Heatmap')
+            plt.colorbar(im, ax=axes[1,1])
+            
+            plt.tight_layout()
+            plt.show()
+            print(f"  {Colors.SUCCESS}✅ Uncertainty plots created{Colors.RESET}")
+            
+        except Exception as e:
+            print(f"  {Colors.WARNING}⚠️ Failed to create uncertainty plots: {str(e)}{Colors.RESET}")
 
 class ANFISModel:
     """ANFIS using xanfis.GdAnfisClassifier."""
@@ -343,6 +485,75 @@ class SHAPAnalyzer:
         print(f"\n{Colors.SUCCESS}🔍 SHAP FEATURE IMPORTANCE{Colors.RESET}")
         for i, (_, row) in enumerate(self.feature_importance.head(5).iterrows(), 1):
             print(f"{i}. {row['feature']:<25} {row['shap_importance']:.4f}")
+        
+        # Создаем SHAP визуализации
+        self.plot_shap_analysis()
+    
+    def plot_shap_analysis(self):
+        """SHAP графики для объяснимости модели."""
+        try:
+            import matplotlib.pyplot as plt
+            import seaborn as sns
+            
+            print(f"  {Colors.INFO}🔍 Creating SHAP visualizations...{Colors.RESET}")
+            
+            if self.shap_values is None or self.feature_importance is None:
+                print(f"  {Colors.WARNING}⚠️ SHAP data not found{Colors.RESET}")
+                return
+            
+            fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+            fig.suptitle('SHAP Model Explainability Analysis', fontsize=16, fontweight='bold')
+            
+            # 1. Feature importance bar plot  
+            feature_importance_df = self.feature_importance.head(8).sort_values('shap_importance', ascending=True)
+            
+            axes[0,0].barh(feature_importance_df['feature'], feature_importance_df['shap_importance'], color='lightcoral')
+            axes[0,0].set_xlabel('Mean SHAP Importance')
+            axes[0,0].set_title('Feature Importance by SHAP Analysis')
+            axes[0,0].grid(True, axis='x')
+            
+            # 2. SHAP values distribution for top feature
+            if len(self.shap_values.shape) > 1 and self.shap_values.shape[1] > 0:
+                top_feature_idx = np.argmax(np.abs(self.shap_values).mean(0))
+                axes[0,1].hist(self.shap_values[:, top_feature_idx], bins=20, color='steelblue', alpha=0.7)
+                axes[0,1].set_xlabel('SHAP Values')
+                axes[0,1].set_ylabel('Number of Patients')
+                feature_name = self.feature_importance.iloc[top_feature_idx]['feature'] if hasattr(self, 'feature_names') else f'Feature {top_feature_idx}'
+                axes[0,1].set_title(f'SHAP Distribution for Top Feature')
+                axes[0,1].grid(True)
+            
+            # 3. Mean absolute SHAP values
+            mean_shap = np.abs(self.shap_values).mean(0)
+            feature_names = self.feature_importance['feature'].tolist()[:len(mean_shap)]
+            
+            # Top-8 features only
+            top_8_indices = np.argsort(mean_shap)[-8:]
+            axes[1,0].bar(range(len(top_8_indices)), mean_shap[top_8_indices], color='orange', alpha=0.7)
+            axes[1,0].set_xticks(range(len(top_8_indices)))
+            axes[1,0].set_xticklabels([feature_names[i] if i < len(feature_names) else f'Feature_{i}' for i in top_8_indices], rotation=45)
+            axes[1,0].set_ylabel('Mean |SHAP Value|')
+            axes[1,0].set_title('Top-8 Features by Absolute SHAP')
+            axes[1,0].grid(True, axis='y')
+            
+            # 4. SHAP values heatmap (sample)
+            if len(self.shap_values) >= 5:
+                sample_shap = self.shap_values[:5, :min(8, self.shap_values.shape[1])]
+                sample_features = feature_names[:min(8, len(feature_names))]
+                
+                im = axes[1,1].imshow(sample_shap.T, cmap='RdBu', aspect='auto')
+                axes[1,1].set_xticks(range(5))
+                axes[1,1].set_xticklabels([f'Patient {i+1}' for i in range(5)])
+                axes[1,1].set_yticks(range(len(sample_features)))
+                axes[1,1].set_yticklabels(sample_features)
+                axes[1,1].set_title('SHAP Heatmap (5 Patients)')
+                plt.colorbar(im, ax=axes[1,1])
+            
+            plt.tight_layout()
+            plt.show()
+            print(f"  {Colors.SUCCESS}✅ SHAP visualizations created{Colors.RESET}")
+            
+        except Exception as e:
+            print(f"  {Colors.WARNING}⚠️ Failed to create SHAP plots: {str(e)}{Colors.RESET}")
 
 class RuleAggregator:
     """Aggregates findings from all AI methods."""
@@ -390,6 +601,86 @@ class RuleAggregator:
         print(f"\n{Colors.INFO}📊 UNIFIED FEATURE RANKING{Colors.RESET}")
         for i, (_, row) in enumerate(self.unified_knowledge.head(5).iterrows(), 1):
             print(f"{i}. {row['feature']:<25} Score: {row['combined_score']:.3f}")
+        
+        # Создаем графики консенсуса
+        self.plot_consensus_analysis()
+    
+    def plot_consensus_analysis(self):
+        """График консенсуса между разными методами."""
+        try:
+            import matplotlib.pyplot as plt
+            import seaborn as sns
+            
+            print(f"  {Colors.INFO}🤝 Creating consensus plots...{Colors.RESET}")
+            
+            if self.unified_knowledge is None:
+                print(f"  {Colors.WARNING}⚠️ Consensus data not found{Colors.RESET}")
+                return
+            
+            fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+            fig.suptitle('Consensus Analysis between XGBoost, SHAP and ANFIS', fontsize=16, fontweight='bold')
+            
+            # 1. Feature importance comparison
+            top_features = self.unified_knowledge.head(8)
+            
+            x = np.arange(len(top_features))
+            width = 0.35
+            
+            axes[0,0].bar(x - width/2, top_features['importance'], width, label='XGBoost', alpha=0.8, color='steelblue')
+            axes[0,0].bar(x + width/2, top_features['shap_importance'], width, label='SHAP', alpha=0.8, color='lightcoral')
+            
+            axes[0,0].set_xlabel('Features')
+            axes[0,0].set_ylabel('Importance')
+            axes[0,0].set_title('Feature Importance Comparison')
+            axes[0,0].set_xticks(x)
+            axes[0,0].set_xticklabels(top_features['feature'], rotation=45, ha='right')
+            axes[0,0].legend()
+            axes[0,0].grid(True, axis='y')
+            
+            # 2. Combined score
+            axes[0,1].bar(top_features['feature'], top_features['combined_score'], 
+                          color='purple', alpha=0.7)
+            axes[0,1].set_xlabel('Features')
+            axes[0,1].set_ylabel('Combined Score')
+            axes[0,1].set_title('Unified Feature Importance')
+            axes[0,1].tick_params(axis='x', rotation=45)
+            axes[0,1].grid(True, axis='y')
+            
+            # 3. Consensus Venn diagram (simplified)
+            consensus_count = len(self.consensus_features['xgb_shap_consensus'])
+            total_features = self.consensus_features['total_features_analyzed']
+            
+            labels = ['XGBoost Only', 'SHAP Only', 'Consensus']
+            sizes = [total_features - consensus_count, total_features - consensus_count, consensus_count]
+            colors = ['lightblue', 'lightgreen', 'gold']
+            
+            if sum(sizes) > 0:
+                axes[1,0].pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90)
+                axes[1,0].set_title('Feature Importance Distribution')
+            
+            # 4. Correlation between XGBoost and SHAP
+            if len(top_features) > 1:
+                correlation = np.corrcoef(top_features['importance'], top_features['shap_importance'])[0, 1]
+                
+                axes[1,1].scatter(top_features['importance'], top_features['shap_importance'], 
+                                 color='red', alpha=0.7, s=60)
+                
+                # Add trend line
+                z = np.polyfit(top_features['importance'], top_features['shap_importance'], 1)
+                p = np.poly1d(z)
+                axes[1,1].plot(top_features['importance'], p(top_features['importance']), "b--", alpha=0.8)
+                
+                axes[1,1].set_xlabel('XGBoost Importance')
+                axes[1,1].set_ylabel('SHAP Importance')
+                axes[1,1].set_title(f'XGBoost-SHAP Correlation\n(r = {correlation:.3f})')
+                axes[1,1].grid(True)
+            
+            plt.tight_layout()
+            plt.show()
+            print(f"  {Colors.SUCCESS}✅ Consensus plots created{Colors.RESET}")
+            
+        except Exception as e:
+            print(f"  {Colors.WARNING}⚠️ Failed to create consensus plots: {str(e)}{Colors.RESET}")
     
     def counterfactual_explanations(self, patient_data: np.ndarray, model, feature_names: List[str]) -> Dict:
         """Generate counterfactual explanations for patient predictions."""
@@ -481,6 +772,20 @@ class ThinkingModule:
         """Generate technical and patient reports based on actual patient data."""
         try:
             print(f"  {Colors.PROGRESS}📝 Generating AI explanation reports...{Colors.RESET}")
+            
+            # Сохраняем данные пациента для визуализации
+            if patient_data is not None:
+                if hasattr(patient_data, 'values'):
+                    self.sample_patient_data = patient_data.values
+                    self.feature_names = patient_data.index.tolist()
+                else:
+                    self.sample_patient_data = patient_data
+                    self.feature_names = [
+                        'age', 'sex', 'cp', 'trestbps', 'chol', 'fbs',
+                        'restecg', 'thalach', 'exang', 'oldpeak', 'slope', 'ca', 'thal'
+                    ]
+                # Сохраняем вероятность для графика
+                self.prediction_probability = prediction_result
             
             # Generate technical report with patient data analysis
             self.technical_report = self._generate_technical_report(consensus_features, prediction_result, patient_data)
@@ -983,3 +1288,89 @@ the cardiovascular risk assessment and supports clinical decision-making."""
         
         print(f"\n{Colors.INFO}👤 PATIENT REPORT{Colors.RESET}")
         print(self.patient_report)
+        
+        # Создаем график профиля пациента если есть данные
+        if hasattr(self, 'sample_patient_data'):
+            self.plot_patient_analysis()
+    
+    def plot_patient_analysis(self):
+        """Радиальная диаграмма параметров пациента."""
+        try:
+            import matplotlib.pyplot as plt
+            import seaborn as sns
+            
+            print(f"  {Colors.INFO}👤 Creating patient profile...{Colors.RESET}")
+            
+            if not hasattr(self, 'sample_patient_data') or not hasattr(self, 'feature_names'):
+                print(f"  {Colors.WARNING}⚠️ Patient data not found{Colors.RESET}")
+                return
+            
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+            
+            # 1. Radar chart for top-8 parameters
+            top_8_features = self.feature_names[:8]
+            values = self.sample_patient_data[:8]
+            
+            # Normalize values for radar chart
+            if len(values) > 1 and values.max() != values.min():
+                normalized_values = (values - values.min()) / (values.max() - values.min())
+            else:
+                normalized_values = np.ones_like(values) * 0.5
+            
+            angles = np.linspace(0, 2 * np.pi, len(top_8_features), endpoint=False)
+            angles = np.concatenate((angles, [angles[0]]))  # Close the circle
+            normalized_values = np.concatenate((normalized_values, [normalized_values[0]]))
+            
+            ax1 = plt.subplot(121, projection='polar')
+            ax1.plot(angles, normalized_values, 'o-', linewidth=2, color='red')
+            ax1.fill(angles, normalized_values, alpha=0.25, color='red')
+            ax1.set_thetagrids(angles[:-1] * 180/np.pi, top_8_features)
+            ax1.set_ylim(0, 1)
+            
+            prediction_prob = getattr(self, 'prediction_probability', 0.5)
+            ax1.set_title(f'Patient Profile\nDisease Probability: {prediction_prob:.1%}', 
+                          pad=20, fontsize=12, fontweight='bold')
+            ax1.grid(True)
+            
+            # 2. Comparison with normal ranges
+            ax2 = plt.subplot(122)
+            
+            # Example normal ranges for medical parameters
+            normal_ranges = {
+                'age': (30, 70), 'trestbps': (90, 140), 'chol': (150, 240),
+                'thalach': (120, 180), 'oldpeak': (0, 2), 'ca': (0, 2),
+                'sex': (0, 1), 'cp': (0, 3), 'fbs': (0, 1), 'restecg': (0, 2),
+                'exang': (0, 1), 'slope': (0, 2), 'thal': (0, 3)
+            }
+            
+            y_pos = np.arange(len(top_8_features))
+            colors = []
+            
+            for i, (feature, value) in enumerate(zip(top_8_features, values)):
+                if feature in normal_ranges:
+                    min_val, max_val = normal_ranges[feature]
+                    if min_val <= value <= max_val:
+                        colors.append('green')  # Normal
+                    else:
+                        colors.append('red')    # Abnormal
+                else:
+                    colors.append('orange')     # Unknown
+            
+            bars = ax2.barh(y_pos, values, color=colors, alpha=0.7)
+            ax2.set_yticks(y_pos)
+            ax2.set_yticklabels(top_8_features)
+            ax2.set_xlabel('Parameter Value')
+            ax2.set_title('Medical Parameters\n🟢 Normal | 🔴 Abnormal | 🟠 Unknown')
+            ax2.grid(True, axis='x')
+            
+            # Add values on bars
+            for bar, value in zip(bars, values):
+                ax2.text(bar.get_width() + 0.1, bar.get_y() + bar.get_height()/2,
+                         f'{value:.1f}', ha='left', va='center')
+            
+            plt.tight_layout()
+            plt.show()
+            print(f"  {Colors.SUCCESS}✅ Patient profile created{Colors.RESET}")
+            
+        except Exception as e:
+            print(f"  {Colors.WARNING}⚠️ Failed to create patient profile: {str(e)}{Colors.RESET}")
