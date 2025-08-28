@@ -337,12 +337,12 @@ FINANCIAL_WEIGHTS = {
 ### 🔒 Medical Safety Disclaimer
 
 > **🚨 RESEARCH PROTOTYPE ONLY**
-> This multi-layer architecture is designed for **research and development purposes**. All medical-related outputs require validation by qualified healthcare professionals.
+> This multi-layer architecture is designed for **research and development purposes**. All medical-related outputs require validation by qualified healthcare professionals
 
 ### 🎓 Academic License
 
 > **📚 RESEARCH \& EDUCATION USE**
-> This methodology is available for academic research and educational purposes. Commercial implementations require separate licensing agreements.
+> This methodology is available for academic research and educational purposes. Commercial implementations require separate licensing agreements
 
 ***
 
